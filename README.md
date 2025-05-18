@@ -20,9 +20,7 @@ These high level labs provide an overview of What is New in VMware Cloud Foundat
   - Module 4 - Monitoring Security Operations in the Private Cloud
   - Module 5 - Charge Back & Billing
 
-## Lab Username
-
-
+## Lab Username(s)
 
 More detail about your lab: Products included.
 
