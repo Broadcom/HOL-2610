@@ -1,16 +1,44 @@
-THIS IS AN EXAMPLE. REPLACE THIS WITH YOUR OWN README.txt using the pattern below.
+  _   _   ___   _           ____    __    _   ___        __  ____  __
+ | | | | / _ \ | |         |___ \  / /_  / | / _ \       \ \/ /\ \/ /
+ | |_| || | | || |    _____  __) || '_ \ | || | | | _____ \  /  \  / 
+ |  _  || |_| || |___|_____|/ __/ | (_) || || |_| ||_____|/  \  /  \ 
+ |_| |_| \___/ |_____|     |_____| \___/ |_| \___/       /_/\_\/_/\_\
 
-This is customer facing so please make it look professional. Thanks.
+       Getting Started with VMware Cloud Foundation (VCF) 9.0
 
-This file can be updated and will be copied to the console desktop at startup.
+Overview
+========
 
-NOTE: this file is public so NEVER include passwords.
+These high level labs provide an overview of What is New in VMware Cloud Foundation (VCF) v9.0
 
-* - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - *
-*                       HOL-26XX Title of Your Lab                              *
-* - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - * - *
+Contents
+========
 
-Primary benefits of your lab.
+HOL-2610-01
+===========
+
+- Module 1
+- Module 2
+
+HOL 2610-02
+===========
+
+- Module 1 - Provider Management & Administration
+- Module 2 - Organization Management & Governance
+- Module 3 - Deploying Modern Applications
+  
+HOL-2610-03
+===========
+
+- Module 1 - Monitoring Private Cloud Infrastructure with VFC Health and Diagnostics
+- Module 2 - Monitoring Network Operations in the Private Cloud
+- Module 3 - Monitoring Storage Operations in the Private Cloud
+- Module 4 - Monitoring Security Operations in the Private Cloud
+- Module 5 - Charge Back & Billing
+
+## Products & Username(s)
+
+
 
 More detail about your lab: Products included.
 
@@ -18,7 +46,7 @@ Additional notes and "interesting" facts about your lab. (pre-release code, simu
 
 Please use the VMware Lab Platform "Send Text" control and copy/paste from Lab Manual
 
-Please record account names for this lab. All acccounts use the standard Hands-on Labs password.
+Please record account names for this lab. All accounts use the standard Hands-on Labs password.
 
 === Module 1 ===
 
