@@ -4,21 +4,24 @@
  |  _  || |_| || |___|_____|/ __/ | (_) || || |_| ||_____|/  \  /  \ 
  |_| |_| \___/ |_____|     |_____| \___/ |_| \___/       /_/\_\/_/\_\
 
-       Getting Started with VMware Cloud Foundation (VCF) 9.0
+#####################################################################
+###    Getting Started with VMware Cloud Foundation (VCF) 9.0.    ###
+#####################################################################
 
 Overview
 ========
 
-These high level labs provide an overview of What is New in VMware Cloud Foundation (VCF) v9.0
+The 2610 labs provide an overview of What is New in VMware Cloud Foundation (VCF) v9.0.
 
 Contents
-========
+============
 
 HOL-2610-01
 ===========
 
-- Module 1
-- Module 2
+- Module 1 - VMware Cloud Foundation Overview
+- Module 2 - Deploying VMware Cloud Foundation
+- Module 3 - Increase Productivity with Virtual Private Clouds (VPCs)
 
 HOL 2610-02
 ===========
@@ -30,35 +33,57 @@ HOL 2610-02
 HOL-2610-03
 ===========
 
-- Module 1 - Monitoring Private Cloud Infrastructure with VFC Health and Diagnostics
+- Module 1 - Monitoring Private Cloud Infrastructure with Diagnostics Findings and VCF Health
 - Module 2 - Monitoring Network Operations in the Private Cloud
 - Module 3 - Monitoring Storage Operations in the Private Cloud
 - Module 4 - Monitoring Security Operations in the Private Cloud
-- Module 5 - Charge Back & Billing
-
-## Products & Username(s)
+- Module 5 - Chargeback
 
 
+Pod Information
+===============
 
-More detail about your lab: Products included.
+Virtual Machine Images:
 
-Additional notes and "interesting" facts about your lab. (pre-release code, simulated data, etc.)
++----------------------------------+---------------------------+-----------------+-----------------------------+
+|  Virtual Machine Images          |           FQDN            |    Type         |          Username           |
++----------------------------------+---------------------------+-----------------+-----------------------------+
+| Ubuntu 24.04                     |                           | local           | root                        |
+|                                  |                           | local           | holuser                     |
++----------------------------------+---------------------------+-----------------+-----------------------------+
 
-Please use the VMware Lab Platform "Send Text" control and copy/paste from Lab Manual
+Applications/Services:
 
-Please record account names for this lab. All accounts use the standard Hands-on Labs password.
++----------------------------------+----------------------------+----------------+-----------------------------+
+|  Application/Service/VMs         |           FQDN             |    Type        |          Username           |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| VCF Operations                   | ops-a.site-a.vcf.lab       | local          | admin                       |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| VCF Operations for logs          | opslogs-a.site-a.vcf.lab   | local          | admin                       |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| VCF Operations for networks      | opsnet-01a.site-a.vcf.lab  | local          | admin@local                 |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| VCF Operations orchestrator      | opsorch-01a.site-a.vcf.lab | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| VCF Automation - Provider Portal | auto-a.site-a.vcf.lab      | Provider Admin | admin                       |
+| VCF Automation - hol-all-apps    |                            | Org Admin      | admin                       |
+| VCF Automation - hol-vm-apps     |                            | Org Admin      | admin                       |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| Management Domain vCenter        | vc-mgmt-a.site-a.vcf.lab   | local          | administrator@vsphere.local |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| Management Domain NSX Manager    | nsx-mgmt-a.site-a.vcf.lab  | local          | admin                       |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| Workload Domain vCenter          | vc-wld-01a.site-a.vcf.lab  | local.         | administrator@wld.sso       |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
+| Workload Domain NSX Manager      | nsx-wld01-a.site-a.vcf.lab | local          | admin                       |
+|                                  |                            | appliance      | root                        |
++----------------------------------+----------------------------+----------------+-----------------------------+
 
-=== Module 1 ===
 
-Credentials for all vCenter Operations Manager Instances:
-User name: admin
-
-For vCenter Server Administration Console:
-User name: root
-
-For the vSphere Client, use:
-User name: administrator@vsphere.local
-
-=== Module 2 ===
-
-big long command line that nobody wants to type
