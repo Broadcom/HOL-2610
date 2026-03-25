@@ -2,6 +2,10 @@
 import datetime
 import os
 import sys
+import ssl
+import json
+import time
+import urllib.request
 from pyVim import connect
 from pyVmomi import vim
 import logging
@@ -294,6 +298,374 @@ if 'vraurls' in lsf.config['VCFFINAL'].keys():
 
 ### Clean up stale SDDC Manager credentials that cause vCenter error banners
 cleanup_stale_sddc_credentials()
+
+##### Fix opsnet-01a service account for VCF Operations integration
+def fix_opsnet_service_account():
+    """
+    Recreates the svc_ops_ops-ni_3e8 service account on opsnet-01a with correct
+    userType=LOCAL and serviceAccount=true in FoundationDB, then updates the
+    VCF Operations adapter credential to use the lab password.
+    
+    The opsnet appliance stores users in FoundationDB, and the built-in UserTool
+    creates accounts with userType=DEFAULT which cannot authenticate. This uses
+    the AuthStore Java API directly to create a proper LOCAL service account.
+    """
+    ctx = ssl._create_unverified_context()
+    password = lsf.password
+    svc_account = 'svc_ops_ops-ni_3e8'
+    customer_id = '18482'
+
+    lsf.write_output('Fixing opsnet-01a service account...')
+
+    si = None
+    for s in lsf.sis:
+        try:
+            if s.content.about.instanceUuid:
+                si = s
+                break
+        except Exception:
+            continue
+
+    if si is None:
+        lsf.write_output('No vCenter connection available for opsnet fix')
+        return False
+
+    content = si.RetrieveContent()
+    opsnet_vm = None
+    for vm in content.viewManager.CreateContainerView(
+        content.rootFolder, [vim.VirtualMachine], True
+    ).view:
+        if vm.name == 'opsnet-01a':
+            opsnet_vm = vm
+            break
+
+    if opsnet_vm is None:
+        lsf.write_output('opsnet-01a VM not found')
+        return False
+
+    if opsnet_vm.runtime.powerState != 'poweredOn':
+        lsf.write_output('opsnet-01a is not powered on, skipping')
+        return False
+
+    creds = vim.vm.guest.NamePasswordAuthentication(
+        username="root", password=password
+    )
+    pm = content.guestOperationsManager.processManager
+    fm = content.guestOperationsManager.fileManager
+
+    java_src = f'''
+import com.vnera.storage.config.AuthStore;
+import com.vnera.storage.config.AuthStore.UserData;
+import com.vnera.storage.config.AuthStore.IndentityProvider;
+import com.vnera.storage.config.AuthStore.UserRoleData;
+import com.vnera.storage.config.AuthStore.AuthFailure;
+import com.vnera.storage.config.ConfigStoreFactory;
+import com.vnera.storage.config.ConfigStore;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.config.Configurator;
+
+public class FixOpsnetSvc {{
+    public static void main(String[] args) throws Exception {{
+        Configurator.setLevel(LogManager.getRootLogger().getName(), Level.OFF);
+        String userId = args[0];
+        String hashedPw = args[1];
+        int cid = Integer.parseInt(args[2]);
+
+        ConfigStore cs = ConfigStoreFactory.getInstance()
+            .getOrCreateStore(ConfigStoreFactory.StoreType.PSQL);
+        AuthStore as = cs.getAuthStore();
+
+        UserData ex = as.getUser(userId);
+        if (ex != null && ex.userEmail != null) {{
+            as.deleteUser(cid, userId);
+            System.out.println("DELETED_EXISTING");
+        }}
+
+        UserData ud = new UserData(cid, userId, userId,
+            false, true, "admin@local",
+            System.currentTimeMillis(), true, false,
+            IndentityProvider.LOCAL, null);
+        ud.setServiceAccount(true);
+        as.createUser(ud, hashedPw);
+
+        try {{
+            as.addUserRole(new UserRoleData(cid, userId, "ADMIN", "admin@local"));
+        }} catch (Exception e) {{
+            // Role may already exist
+        }}
+        as.updateAuthFailure(userId, new AuthFailure(0, 0));
+
+        UserData v = as.getUser(userId);
+        if (v != null) {{
+            System.out.println("TYPE=" + v.getUserType());
+            System.out.println("SVC=" + v.isServiceAccount());
+            System.out.println("SUCCESS");
+        }}
+        cs.shutdown();
+        System.exit(0);
+    }}
+}}
+'''
+
+    script = f'''#!/bin/bash
+cd /home/ubuntu/build-target
+JAVA=/usr/lib/jvm/openjdk-java17-amd64/bin/java
+JAVAC=/usr/lib/jvm/openjdk-java17-amd64/bin/javac
+CP="/home/ubuntu/build-target/common-utils/tools-0.001-SNAPSHOT.jar"
+PW='{password}'
+
+# Hash the password
+echo "$PW" > /tmp/.r
+HASHED=$($JAVA -jar /home/ubuntu/build-target/cli/shiro-tools-hasher-1.12.0-cli.jar \\
+    -a SHA-256 -f shiro1 -i 500000 -gs -r /tmp/.r 2>/dev/null)
+rm -f /tmp/.r
+
+cat > /tmp/FixOpsnetSvc.java << 'JAVAEOF'
+{java_src}
+JAVAEOF
+
+$JAVAC -cp "$CP" /tmp/FixOpsnetSvc.java -d /tmp/ 2>&1 | grep -v "^warning"
+$JAVA -cp "/tmp:$CP" FixOpsnetSvc "{svc_account}" "$HASHED" "{customer_id}" 2>&1
+
+# Also reset auth failures for admin@local
+cat > /tmp/ResetLockout.java << 'JAVAEOF2'
+import com.vnera.storage.config.AuthStore;
+import com.vnera.storage.config.AuthStore.AuthFailure;
+import com.vnera.storage.config.ConfigStoreFactory;
+import com.vnera.storage.config.ConfigStore;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.config.Configurator;
+public class ResetLockout {{
+    public static void main(String[] args) throws Exception {{
+        Configurator.setLevel(LogManager.getRootLogger().getName(), Level.OFF);
+        ConfigStore cs = ConfigStoreFactory.getInstance()
+            .getOrCreateStore(ConfigStoreFactory.StoreType.PSQL);
+        AuthStore as = cs.getAuthStore();
+        for (String u : args) {{
+            as.updateAuthFailure(u, new AuthFailure(0, 0));
+            System.out.println("RESET_LOCKOUT=" + u);
+        }}
+        cs.shutdown();
+        System.exit(0);
+    }}
+}}
+JAVAEOF2
+$JAVAC -cp "$CP" /tmp/ResetLockout.java -d /tmp/ 2>&1 | grep -v "^warning"
+$JAVA -cp "/tmp:$CP" ResetLockout "{svc_account}" "admin@local" 2>&1
+'''
+
+    try:
+        script_bytes = script.encode('utf-8')
+        attr = vim.vm.guest.FileManager.FileAttributes()
+        url = fm.InitiateFileTransferToGuest(
+            opsnet_vm, creds, '/tmp/fix_svc.sh', attr, len(script_bytes), True
+        )
+        req = urllib.request.Request(url, data=script_bytes, method='PUT')
+        req.add_header('Content-Type', 'application/octet-stream')
+        urllib.request.urlopen(req, context=ctx)
+
+        spec = vim.vm.guest.ProcessManager.ProgramSpec(
+            programPath="/bin/bash",
+            arguments="-c 'chmod +x /tmp/fix_svc.sh && /tmp/fix_svc.sh > /tmp/fix_svc_output.txt 2>&1'"
+        )
+        pm.StartProgramInGuest(opsnet_vm, creds, spec)
+        time.sleep(40)
+
+        info = fm.InitiateFileTransferFromGuest(
+            opsnet_vm, creds, '/tmp/fix_svc_output.txt'
+        )
+        resp = urllib.request.urlopen(info.url, context=ctx)
+        output = resp.read().decode('utf-8', errors='replace')
+
+        if 'SUCCESS' in output:
+            lsf.write_output('opsnet-01a service account created successfully')
+        else:
+            lsf.write_output(f'opsnet-01a service account fix output: {output[:500]}')
+            return False
+
+    except Exception as e:
+        lsf.write_output(f'opsnet-01a service account fix failed: {e}')
+        return False
+
+    # Update VCF Operations adapter credential
+    try:
+        lsf.write_output('Updating VCF Operations adapter credential...')
+        ops_host = 'ops-a.site-a.vcf.lab'
+
+        token_body = json.dumps({
+            "username": "admin", "authSource": "local", "password": password
+        }).encode()
+        req = urllib.request.Request(
+            f'https://{ops_host}/suite-api/api/auth/token/acquire',
+            data=token_body, method='POST'
+        )
+        req.add_header('Content-Type', 'application/json')
+        resp = urllib.request.urlopen(req, context=ctx)
+        ops_token = json.loads(resp.read()).get('token', '')
+
+        if not ops_token:
+            lsf.write_output('Failed to get VCF Ops token')
+            return False
+
+        ops_headers = {
+            'Authorization': f'OpsToken {ops_token}',
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+
+        # Find NETWORK_INSIGHT adapter
+        req = urllib.request.Request(
+            f'https://{ops_host}/suite-api/api/adapters?adapterKindKey=NETWORK_INSIGHT'
+        )
+        for k, v in ops_headers.items():
+            req.add_header(k, v)
+        resp = urllib.request.urlopen(req, context=ctx)
+        adapters = json.loads(resp.read())
+        adapter_list = adapters.get('adapterInstancesInfoDto', [])
+        if not adapter_list:
+            lsf.write_output('No NETWORK_INSIGHT adapter found')
+            return False
+
+        adapter = adapter_list[0]
+        adapter_id = adapter['id']
+        cred_id = adapter.get('credentialInstanceId', '')
+
+        # Create or find an editable credential
+        req = urllib.request.Request(
+            f'https://{ops_host}/suite-api/api/credentials'
+        )
+        for k, v in ops_headers.items():
+            req.add_header(k, v)
+        resp = urllib.request.urlopen(req, context=ctx)
+        all_creds = json.loads(resp.read()).get('credentialInstances', [])
+
+        editable_cred_id = None
+        for c in all_creds:
+            if c.get('adapterKindKey') == 'NETWORK_INSIGHT' and c.get('editable'):
+                editable_cred_id = c['id']
+                break
+
+        if editable_cred_id is None:
+            new_cred = {
+                "name": "ops-ni integration credential fixed",
+                "adapterKindKey": "NETWORK_INSIGHT",
+                "credentialKindKey": "NETWORK_INSIGHT_CREDENTIAL",
+                "fields": [
+                    {"name": "USERNAME", "value": svc_account},
+                    {"name": "PASSWORD", "value": password}
+                ]
+            }
+            body = json.dumps(new_cred).encode()
+            req = urllib.request.Request(
+                f'https://{ops_host}/suite-api/api/credentials',
+                data=body, method='POST'
+            )
+            for k, v in ops_headers.items():
+                req.add_header(k, v)
+            resp = urllib.request.urlopen(req, context=ctx)
+            created_cred = json.loads(resp.read())
+            editable_cred_id = created_cred['id']
+            lsf.write_output(f'Created new editable credential: {editable_cred_id}')
+        else:
+            update_cred = {
+                "id": editable_cred_id,
+                "name": "ops-ni integration credential fixed",
+                "adapterKindKey": "NETWORK_INSIGHT",
+                "credentialKindKey": "NETWORK_INSIGHT_CREDENTIAL",
+                "fields": [
+                    {"name": "USERNAME", "value": svc_account},
+                    {"name": "PASSWORD", "value": password}
+                ]
+            }
+            body = json.dumps(update_cred).encode()
+            req = urllib.request.Request(
+                f'https://{ops_host}/suite-api/api/credentials',
+                data=body, method='PUT'
+            )
+            for k, v in ops_headers.items():
+                req.add_header(k, v)
+            resp = urllib.request.urlopen(req, context=ctx)
+            lsf.write_output(f'Updated editable credential: {editable_cred_id}')
+
+        # Assign credential to adapter
+        if cred_id != editable_cred_id:
+            req = urllib.request.Request(
+                f'https://{ops_host}/suite-api/api/adapters/{adapter_id}'
+            )
+            for k, v in ops_headers.items():
+                req.add_header(k, v)
+            resp = urllib.request.urlopen(req, context=ctx)
+            adapter_data = json.loads(resp.read())
+
+            adapter_data['credentialInstanceId'] = editable_cred_id
+            if 'collectorGroupId' in adapter_data:
+                del adapter_data['collectorGroupId']
+
+            body = json.dumps(adapter_data).encode()
+            req = urllib.request.Request(
+                f'https://{ops_host}/suite-api/api/adapters',
+                data=body, method='PUT'
+            )
+            for k, v in ops_headers.items():
+                req.add_header(k, v)
+            resp = urllib.request.urlopen(req, context=ctx)
+            lsf.write_output('Adapter credential updated')
+
+        # Fix Fleet Management password for opsnet admin@local
+        try:
+            lsf.write_output('Fixing Fleet Management password for opsnet-01a admin@local...')
+            ops_headers['X-vRealizeOps-API-use-unsupported'] = 'true'
+            
+            # Query password accounts
+            req = urllib.request.Request(
+                f'https://{ops_host}/suite-api/internal/passwordmanagement/passwords/query',
+                data=json.dumps({"searchCriteria": {}}).encode(),
+                method='POST'
+            )
+            for k, v in ops_headers.items():
+                req.add_header(k, v)
+            resp = urllib.request.urlopen(req, context=ctx)
+            accounts = json.loads(resp.read()).get('vcfPasswordAccounts', [])
+            
+            target_key = None
+            for acc in accounts:
+                if acc.get('applianceFqdn') == 'opsnet-01a.site-a.vcf.lab' and acc.get('userName') == 'admin@local':
+                    if acc.get('status') == 'DISCONNECTED':
+                        target_key = acc.get('passwordResourceKey')
+                    break
+                    
+            if target_key:
+                payload = json.dumps({
+                    "password": password,
+                    "userName": "admin@local"
+                }).encode()
+                req = urllib.request.Request(
+                    f'https://{ops_host}/suite-api/internal/passwordmanagement/passwords/{target_key}/update',
+                    data=payload,
+                    method='PUT'
+                )
+                for k, v in ops_headers.items():
+                    req.add_header(k, v)
+                resp = urllib.request.urlopen(req, context=ctx)
+                lsf.write_output('Fleet Management password update task started')
+        except Exception as e:
+            lsf.write_output(f'Fleet Management password update failed: {e}')
+
+        lsf.write_output('VCF Operations opsnet fix complete')
+        return True
+
+    except Exception as e:
+        lsf.write_output(f'VCF Operations adapter update failed: {e}')
+        return False
+
+
+try:
+    fix_opsnet_service_account()
+except Exception as e:
+    lsf.write_output(f'opsnet fix exception: {e}')
+
 
 for si in lsf.sis:
     connect.Disconnect(si)
