@@ -1,4 +1,4 @@
-# VCFfinal.py version 1.4 2026-03-25
+# VCFfinal.py version 1.7 2026-07-08
 import datetime
 import os
 import sys
@@ -185,7 +185,7 @@ lsf.write_vpodprogress('Tanzu Start', 'GOOD-8', color=color)
 
 ### Start SupervisorControlPlaneVMs
 vcfmgmtcluster = []
-if 'vcfmgmtcluster' in lsf.config['VCF'].keys():
+if lsf.config.has_section('VCF') and 'vcfmgmtcluster' in lsf.config['VCF'].keys():
     vcfmgmtcluster = lsf.config.get('VCF', 'vcfmgmtcluster').split('\n')
     lsf.write_vpodprogress('VCF Hosts Connect', 'GOOD-3', color=color)
     lsf.connect_vcenters(vcfmgmtcluster)
@@ -208,8 +208,30 @@ for vm in supvms:
 # if supvms list is not empty, then restart the webhooks
 if supvms:
     lsf.write_output(f'Restarting Supervisor Webhooks')
+    # Record the current size of the LMC logfile so we can forward any new
+    # entries written by the script (which writes only to that one path) into
+    # all lsf logfiles, giving the local log full visibility of the run.
+    _wh_log = "/lmchol/hol/labstartup.log"
+    try:
+        _wh_start = os.path.getsize(_wh_log)
+    except OSError:
+        _wh_start = 0
     lsf.run_command("/home/holuser/hol/Tools/restart_k8s_webhooks.sh")
-                
+    # Read the script's new log entries into memory FIRST, then close the file
+    # before calling lsf.write_output() — otherwise write_output() appends to
+    # the same file we are iterating over, creating an infinite feedback loop.
+    try:
+        with open(_wh_log, 'r', errors='replace') as _wh_f:
+            _wh_f.seek(_wh_start)
+            _wh_lines = _wh_f.readlines()
+    except OSError:
+        _wh_lines = []
+    for _wh_line in _wh_lines:
+        _stripped = _wh_line.rstrip()
+        if _stripped:
+            lsf.write_output(f'  [webhooks] {_stripped}')
+    lsf.write_output(f'Supervisor Webhooks restart complete')
+
 # Wizardry to deploy Tanzu
 
 tanzucreate = []
@@ -272,10 +294,12 @@ vraurls = []
 if 'vraurls' in lsf.config['VCFFINAL'].keys():
     vraurls = lsf.config.get('VCFFINAL', 'vraurls').split('\n')
     lsf.write_vpodprogress('Aria Automation URL Checks', 'GOOD-8', color=color)
-    lsf.write_output('Aria Automation URL Checks...')
     # Check VCF Automation ssh for password expiration and fix if expired
     lsf.write_output('Fixing expired automation pw if necessary...')
     lsf.run_command("/home/holuser/hol/Tools/vcfapwcheck.sh")
+    # Renew VCFA Kubernetes certificates to 5-year validity if any are expired
+    lsf.write_output('Waiting 10s for VCFA to stabilize before renewing K8s certs...')
+    lsf.labstartup_sleep(10)
     lsf.write_output('Copying k8s-renew-certs-5y.sh to VCFA (10.1.1.71)...')
     scp_cmd = [
         'sshpass', '-f', '/home/holuser/creds.txt',
